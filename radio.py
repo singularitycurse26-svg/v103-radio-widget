@@ -5,9 +5,13 @@ import threading
 import time
 import os
 import sys
+import json
+import re
+import requests
 
 V103_URL = "https://live.amperwave.net/direct/audacy-wveefmaac-imc"
 VLC_PATH = r"C:\Program Files\VideoLAN\VLC\vlc.exe"
+PLAYLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "playlist.json")
 
 COLORS = {
     "bg": "#0a0a0f",
@@ -17,14 +21,30 @@ COLORS = {
     "text": "#ffffff",
     "muted": "#8888aa",
     "success": "#00e676",
+    "saved": "#FFD700",
     "glow": "#E91E63",
 }
+
+def load_playlist():
+    try:
+        if os.path.exists(PLAYLIST_PATH):
+            return json.loads(open(PLAYLIST_PATH, "r", encoding="utf-8").read())
+    except Exception:
+        pass
+    return []
+
+def save_playlist(songs):
+    try:
+        with open(PLAYLIST_PATH, "w", encoding="utf-8") as f:
+            json.dump(songs, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
 
 class RadioWidget:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("V-103 Atlanta")
-        self.root.geometry("320x180+50+50")
+        self.root.geometry("360x240+50+50")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.95)
@@ -34,9 +54,14 @@ class RadioWidget:
         self.is_playing = False
         self.vlc_proc = None
         self.stop_event = threading.Event()
+        self.meta_stop_event = threading.Event()
         self.watch_thread = None
+        self.meta_thread = None
         self.volume = 100
         self.bars = []
+        self.current_song = ""
+        self.playlist = load_playlist()
+        self.show_playlist = False
 
         self._build_ui()
         self._start_drag_bindings()
@@ -45,41 +70,53 @@ class RadioWidget:
 
     def _build_ui(self):
         self.canvas = tk.Canvas(
-            self.root, width=320, height=180, bg=COLORS["bg"],
+            self.root, width=360, height=240, bg=COLORS["bg"],
             highlightthickness=0, bd=0
         )
         self.canvas.place(x=0, y=0)
 
-        self.canvas.create_rectangle(0, 0, 320, 180, fill=COLORS["bg"], outline="")
-        self.canvas.create_rectangle(0, 0, 320, 4, fill=COLORS["accent"], outline="")
-
-        self.canvas.create_text(160, 22, text="V-103", font=("Segoe UI", 16, "bold"),
+        self.canvas.create_rectangle(0, 0, 360, 4, fill=COLORS["accent"], outline="")
+        self.canvas.create_text(180, 22, text="V-103", font=("Segoe UI", 16, "bold"),
                                 fill=COLORS["text"])
-        self.canvas.create_text(160, 42, text="ATLANTA", font=("Segoe UI", 8),
+        self.canvas.create_text(180, 42, text="ATLANTA", font=("Segoe UI", 8),
                                 fill=COLORS["accent"])
 
-        self.status_text = self.canvas.create_text(160, 62, text="Connecting...",
+        self.status_text = self.canvas.create_text(180, 60, text="Connecting...",
                                                    font=("Segoe UI", 8), fill=COLORS["muted"])
 
-        self._create_equalizer(160, 85)
+        self._create_equalizer(180, 82)
 
-        self.play_btn = self.canvas.create_oval(135, 115, 185, 165,
+        self.canvas.create_text(180, 108, text="NOW PLAYING", font=("Segoe UI", 7),
+                                fill=COLORS["muted"])
+
+        self.song_text = self.canvas.create_text(180, 128, text="Loading...",
+                                                  font=("Segoe UI", 10, "bold"),
+                                                  fill=COLORS["text"], width=320)
+
+        self.save_btn = self.canvas.create_rectangle(140, 145, 220, 168,
+                                                       fill=COLORS["surface"], outline=COLORS["accent2"])
+        self.save_label = self.canvas.create_text(180, 156, text="♡ Save to Playlist",
+                                                    font=("Segoe UI", 8), fill=COLORS["text"])
+        self.canvas.tag_bind(self.save_btn, "<Button-1>", self.save_song)
+        self.canvas.tag_bind(self.save_label, "<Button-1>", self.save_song)
+
+        self.play_btn = self.canvas.create_oval(155, 178, 205, 228,
                                                  fill=COLORS["accent"], outline=COLORS["accent2"],
                                                  width=2)
-        self.play_icon = self.canvas.create_text(160, 140, text="▶",
+        self.play_icon = self.canvas.create_text(180, 203, text="▶",
                                                   font=("Segoe UI", 18, "bold"), fill=COLORS["text"])
         self.canvas.tag_bind(self.play_btn, "<Button-1>", self.toggle_play)
         self.canvas.tag_bind(self.play_icon, "<Button-1>", self.toggle_play)
 
-        self.close_btn = self.canvas.create_text(305, 15, text="✕",
+        self.playlist_btn = self.canvas.create_text(50, 203, text="📋",
+                                                     font=("Segoe UI", 12), fill=COLORS["muted"])
+        self.canvas.tag_bind(self.playlist_btn, "<Button-1>", self.toggle_playlist_view)
+
+        self.close_btn = self.canvas.create_text(345, 15, text="✕",
                                                   font=("Segoe UI", 10), fill=COLORS["muted"])
         self.canvas.tag_bind(self.close_btn, "<Button-1>", self.quit)
 
-        self.min_btn = self.canvas.create_text(288, 15, text="—",
-                                                font=("Segoe UI", 10), fill=COLORS["muted"])
-        self.canvas.tag_bind(self.min_btn, "<Button-1>", self.minimize)
-
-        self.canvas.create_text(160, 172, text="The People's Station · 24/7",
+        self.canvas.create_text(180, 235, text="The People's Station · 24/7",
                                 font=("Segoe UI", 7), fill=COLORS["muted"])
 
         self._animate_bars()
@@ -93,7 +130,7 @@ class RadioWidget:
         self.bars = []
         for i in range(n):
             x = start_x + i * (bar_w + gap)
-            bar = self.canvas.create_rectangle(x, cy - 12, x + bar_w, cy + 12,
+            bar = self.canvas.create_rectangle(x, cy - 10, x + bar_w, cy + 10,
                                                 fill=COLORS["accent2"], outline="")
             self.bars.append(bar)
 
@@ -101,15 +138,15 @@ class RadioWidget:
         import random
         if self.is_playing:
             for bar in self.bars:
-                h = random.randint(4, 24)
+                h = random.randint(4, 20)
                 cx = (self.canvas.coords(bar)[0] + self.canvas.coords(bar)[2]) / 2
-                self.canvas.coords(bar, cx - 2, 85 - h, cx + 2, 85 + h)
+                self.canvas.coords(bar, cx - 2, 82 - h, cx + 2, 82 + h)
                 color = COLORS["accent"] if random.random() > 0.5 else COLORS["accent2"]
                 self.canvas.itemconfig(bar, fill=color)
         else:
             for bar in self.bars:
                 cx = (self.canvas.coords(bar)[0] + self.canvas.coords(bar)[2]) / 2
-                self.canvas.coords(bar, cx - 2, 83, cx + 2, 87)
+                self.canvas.coords(bar, cx - 2, 80, cx + 2, 84)
                 self.canvas.itemconfig(bar, fill=COLORS["muted"])
         self.root.after(150, self._animate_bars)
 
@@ -130,17 +167,21 @@ class RadioWidget:
         if self.is_playing:
             return
         self.stop_event.clear()
+        self.meta_stop_event.clear()
         self.is_playing = True
         self.canvas.itemconfig(self.play_icon, text="⏸")
         self.canvas.itemconfig(self.status_text, text="● LIVE", fill=COLORS["success"])
         self.watch_thread = threading.Thread(target=self._vlc_loop, daemon=True)
         self.watch_thread.start()
+        self.meta_thread = threading.Thread(target=self._metadata_loop, daemon=True)
+        self.meta_thread.start()
 
     def pause(self):
         if not self.is_playing:
             return
         self.is_playing = False
         self.stop_event.set()
+        self.meta_stop_event.set()
         self.canvas.itemconfig(self.play_icon, text="▶")
         self.canvas.itemconfig(self.status_text, text="Paused", fill=COLORS["muted"])
         self._kill_vlc()
@@ -169,6 +210,93 @@ class RadioWidget:
             except Exception:
                 time.sleep(5)
 
+    def _metadata_loop(self):
+        while not self.meta_stop_event.is_set():
+            try:
+                r = requests.get(V103_URL, stream=True,
+                                 headers={'Icy-MetaData': '1'},
+                                 timeout=10, verify=False)
+                metaint = int(r.headers.get('icy-metaint', 2048))
+                while not self.meta_stop_event.is_set():
+                    r.raw.read(metaint)
+                    ml = ord(r.raw.read(1))
+                    if ml > 0:
+                        meta = r.raw.read(ml * 16).decode('utf-8', 'ignore').strip('\x00')
+                        m = re.search(r"StreamTitle='([^']*)'", meta)
+                        if m:
+                            title = m.group(1).strip()
+                            if title and title != self.current_song:
+                                self.current_song = title
+                                self.root.after(0, self._update_song_display)
+                r.close()
+            except Exception:
+                time.sleep(5)
+
+    def _update_song_display(self):
+        song = self.current_song if self.current_song else "No info available"
+        self.canvas.itemconfig(self.song_text, text=song)
+        is_saved = any(s["title"] == self.current_song for s in self.playlist)
+        if is_saved:
+            self.canvas.itemconfig(self.save_btn, fill=COLORS["saved"])
+            self.canvas.itemconfig(self.save_label, text="♥ Saved",
+                                    fill=COLORS["bg"])
+        else:
+            self.canvas.itemconfig(self.save_btn, fill=COLORS["surface"])
+            self.canvas.itemconfig(self.save_label, text="♡ Save to Playlist",
+                                    fill=COLORS["text"])
+
+    def save_song(self, event=None):
+        if not self.current_song:
+            return
+        if any(s["title"] == self.current_song for s in self.playlist):
+            self.playlist = [s for s in self.playlist if s["title"] != self.current_song]
+            save_playlist(self.playlist)
+            self._update_song_display()
+            return
+        self.playlist.append({
+            "title": self.current_song,
+            "station": "V-103 Atlanta",
+            "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S")
+        })
+        save_playlist(self.playlist)
+        self._update_song_display()
+
+    def toggle_playlist_view(self, event=None):
+        self.show_playlist = not self.show_playlist
+        if self.show_playlist:
+            self._show_playlist_window()
+        else:
+            self.root.geometry("360x240")
+
+    def _show_playlist_window(self):
+        self.root.geometry("360x480")
+        pl_window = tk.Toplevel(self.root)
+        pl_window.geometry("360x240+50+290")
+        pl_window.overrideredirect(True)
+        pl_window.attributes("-topmost", True)
+        pl_window.configure(bg=COLORS["bg"])
+
+        canvas = tk.Canvas(pl_window, width=360, height=240, bg=COLORS["bg"],
+                          highlightthickness=0, bd=0)
+        canvas.place(x=0, y=0)
+        canvas.create_rectangle(0, 0, 360, 4, fill=COLORS["accent"], outline="")
+        canvas.create_text(180, 20, text="MY PLAYLIST", font=("Segoe UI", 12, "bold"),
+                          fill=COLORS["text"])
+        canvas.create_text(180, 38, text=f"{len(self.playlist)} songs saved",
+                          font=("Segoe UI", 8), fill=COLORS["muted"])
+
+        y = 55
+        for song in self.playlist[-15:]:
+            canvas.create_text(10, y, text=f"♪ {song['title'][:45]}",
+                              font=("Segoe UI", 8), fill=COLORS["text"], anchor="w")
+            y += 18
+
+        close_btn = canvas.create_text(345, 15, text="✕",
+                                       font=("Segoe UI", 10), fill=COLORS["muted"])
+        canvas.tag_bind(close_btn, "<Button-1>", lambda e: pl_window.destroy())
+
+        pl_window.protocol("WM_DELETE_WINDOW", pl_window.destroy)
+
     def _kill_vlc(self):
         if self.vlc_proc and self.vlc_proc.poll() is None:
             try:
@@ -181,15 +309,9 @@ class RadioWidget:
                     pass
         self.vlc_proc = None
 
-    def minimize(self, event=None):
-        self.root.withdraw()
-        self.root.after(100, self._show_back)
-
-    def _show_back(self):
-        pass
-
     def quit(self, event=None):
         self.stop_event.set()
+        self.meta_stop_event.set()
         self._kill_vlc()
         self.root.destroy()
 
