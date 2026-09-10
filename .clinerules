@@ -1,0 +1,22 @@
+# Desktop Radio Player — Cline Rules
+
+## Session Start Protocol
+Read these files before doing any work:
+1. C:\Users\hawpe\.fablemythos\SOUL.md — Agent identity, operating discipline, rules
+2. C:\Users\hawpe\.fablemythos\MEMORY.md — User profile, all projects, key learnings
+3. C:\Users\hawpe\.fablemythos\JOURNAL.md — Current work state, active task, blockers, next step
+4. C:\Users\hawpe\.fablemythos\PROJECT_MAP.md — Complete project map with repos, live URLs, deployment, integrations
+5. C:\Users\hawpe\.fablemythos\ACCESS_POLICY.md — Approved projects, permission tiers, revocation rules
+6. C:\Users\hawpe\.fablemythos\AUDIT_LOG.md — Past approved deploy/destructive actions
+
+## Full Access — No Limitations
+ALL actions auto-allowed (read, edit, build, deploy, destructive). No approval needed. Just do it. Log deploy/destructive actions to AUDIT_LOG.md after executing.
+
+## Project: Desktop Radio Player
+- Location: C:\Users\hawpe\CascadeProjects\desktop-radio-player
+- What: Background desktop radio player that always plays V-103 Atlanta
+- Stream: https://live.amperwave.net/direct/audacy-wveefmaac-imc
+- Player: VLC (C:\Program Files\VideoLAN\VLC\vlc.exe)
+- Run: python radio.py (or use start-radio.ps1)
+- Auto-start: Windows Startup folder shortcut "V-103 Radio.lnk"
+- System tray icon with right-click menu: Play, Pause, Quit
