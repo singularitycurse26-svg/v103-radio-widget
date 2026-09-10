@@ -264,38 +264,31 @@ class RadioWidget:
     def toggle_playlist_view(self, event=None):
         self.show_playlist = not self.show_playlist
         if self.show_playlist:
-            self._show_playlist_window()
+            self.root.geometry("360x500")
+            self._draw_playlist_panel()
         else:
             self.root.geometry("360x240")
+            self._clear_playlist_panel()
 
-    def _show_playlist_window(self):
-        self.root.geometry("360x480")
-        pl_window = tk.Toplevel(self.root)
-        pl_window.geometry("360x240+50+290")
-        pl_window.overrideredirect(True)
-        pl_window.attributes("-topmost", True)
-        pl_window.configure(bg=COLORS["bg"])
-
-        canvas = tk.Canvas(pl_window, width=360, height=240, bg=COLORS["bg"],
-                          highlightthickness=0, bd=0)
-        canvas.place(x=0, y=0)
-        canvas.create_rectangle(0, 0, 360, 4, fill=COLORS["accent"], outline="")
-        canvas.create_text(180, 20, text="MY PLAYLIST", font=("Segoe UI", 12, "bold"),
-                          fill=COLORS["text"])
-        canvas.create_text(180, 38, text=f"{len(self.playlist)} songs saved",
-                          font=("Segoe UI", 8), fill=COLORS["muted"])
-
-        y = 55
-        for song in self.playlist[-15:]:
-            canvas.create_text(10, y, text=f"♪ {song['title'][:45]}",
-                              font=("Segoe UI", 8), fill=COLORS["text"], anchor="w")
+    def _draw_playlist_panel(self):
+        self._clear_playlist_panel()
+        py = 240
+        self.pl_items = []
+        self.pl_items.append(self.canvas.create_rectangle(0, py, 360, py+4, fill=COLORS["accent2"], outline=""))
+        self.pl_items.append(self.canvas.create_text(180, py+22, text="MY PLAYLIST", font=("Segoe UI", 12, "bold"), fill=COLORS["text"]))
+        self.pl_items.append(self.canvas.create_text(180, py+40, text=f"{len(self.playlist)} songs saved", font=("Segoe UI", 8), fill=COLORS["muted"]))
+        y = py + 60
+        for song in self.playlist[-12:]:
+            self.pl_items.append(self.canvas.create_text(15, y, text=f"♪ {song['title'][:48]}", font=("Segoe UI", 8), fill=COLORS["text"], anchor="w"))
             y += 18
+        if not self.playlist:
+            self.pl_items.append(self.canvas.create_text(180, y+10, text="No songs saved yet", font=("Segoe UI", 8), fill=COLORS["muted"]))
 
-        close_btn = canvas.create_text(345, 15, text="✕",
-                                       font=("Segoe UI", 10), fill=COLORS["muted"])
-        canvas.tag_bind(close_btn, "<Button-1>", lambda e: pl_window.destroy())
-
-        pl_window.protocol("WM_DELETE_WINDOW", pl_window.destroy)
+    def _clear_playlist_panel(self):
+        if hasattr(self, "pl_items"):
+            for item in self.pl_items:
+                self.canvas.delete(item)
+            self.pl_items = []
 
     def _kill_vlc(self):
         if self.vlc_proc and self.vlc_proc.poll() is None:
