@@ -252,6 +252,8 @@ class RadioWidget:
             self.playlist = [s for s in self.playlist if s["title"] != self.current_song]
             save_playlist(self.playlist)
             self._update_song_display()
+            if self.show_playlist:
+                self._draw_playlist_panel()
             return
         self.playlist.append({
             "title": self.current_song,
@@ -260,13 +262,17 @@ class RadioWidget:
         })
         save_playlist(self.playlist)
         self._update_song_display()
+        if self.show_playlist:
+            self._draw_playlist_panel()
 
     def toggle_playlist_view(self, event=None):
         self.show_playlist = not self.show_playlist
         if self.show_playlist:
             self.root.geometry("360x500")
+            self.canvas.config(height=500)
             self._draw_playlist_panel()
         else:
+            self.canvas.config(height=240)
             self.root.geometry("360x240")
             self._clear_playlist_panel()
 
